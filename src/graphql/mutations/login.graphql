@@ -1,0 +1,6 @@
+mutation Login($l_username: String!, $password: String!, $usernameType: UserNameType!) {
+  login(l_username: $l_username, password : $password, usernameType : $usernameType) {
+    ...RegularUserResponse
+  }
+}
+
