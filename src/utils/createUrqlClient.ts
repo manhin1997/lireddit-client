@@ -1,8 +1,8 @@
-import { dedupExchange, fetchExchange, Exchange } from "urql";
+import { dedupExchange, fetchExchange, Exchange, stringifyVariables } from "urql";
 import {pipe, tap } from 'wonka';
 import { LoginMutation, MeQuery, MeDocument, RegisterMutation, LogoutMutation } from "../generated/graphql";
 import { betterupdateQuery } from "./betterupdateQuery";
-import {cacheExchange} from '@urql/exchange-graphcache';
+import {cacheExchange, Resolver} from '@urql/exchange-graphcache';
 import Router from 'next/router';
 
 export const createUrqlClient = ((ssrExchange : any) => ({
@@ -11,6 +11,14 @@ export const createUrqlClient = ((ssrExchange : any) => ({
     credentials: "include" as const,
   },
   exchanges: [dedupExchange, cacheExchange({
+    keys:{
+      PaginatedPosts: () => null,
+    },
+    resolvers: {
+      Query: {
+        posts: cursorPagination(),
+      }
+    },
     updates: {
       Mutation: {
         login : (_result, args, cache, info) => {
@@ -52,16 +60,47 @@ export const createUrqlClient = ((ssrExchange : any) => ({
   }),ssrExchange, errorExchange ,fetchExchange]
 }));
 
-  export const errorExchange: Exchange = ({ forward }) => ops$ => {
-    return pipe(
-      forward(ops$),
-      tap(({ error }) => {
-        if (error) {
-          if(error.message.includes("not authenticated")){
-            Router.replace("/login");
-          }
-        }
-      })
-    );
+
+const cursorPagination = (): Resolver => {
+  return (_parent, fieldArgs, cache, info) => {
+    const { parentKey: entityKey, fieldName } = info;
+    const allFields = cache.inspectFields(entityKey);
+    const fieldInfos = allFields.filter((info) => info.fieldName === fieldName);
+    const size = fieldInfos.length;
+    if (size === 0) {
+      return undefined;
+    }
+    info.partial = true;
+    let hasMore = true;
+    const results: string[] = [];
+    fieldInfos.forEach((fi) => {
+      const key = cache.resolve(entityKey, fi.fieldKey) as string;
+      const data = cache.resolve(key, "posts") as string[];
+      const _hasMore = cache.resolve(key, "hasMore");
+      if (!_hasMore) {
+        hasMore = _hasMore as boolean;
+      }
+      results.push(...data);
+    });
+
+    return {
+      __typename: "PaginatedPosts",
+      hasMore,
+      posts: results,
+    };
   };
+};
+
+const errorExchange: Exchange = ({ forward }) => ops$ => {
+  return pipe(
+    forward(ops$),
+    tap(({ error }) => {
+      if (error) {
+        if(error.message.includes("not authenticated")){
+          Router.replace("/login");
+        }
+      }
+    })
+  );
+};
 
